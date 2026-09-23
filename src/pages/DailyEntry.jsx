@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { query, where } from 'firebase/firestore';
-import { col, deleteEntry, saveEntry, useLive, useSuppliers } from '../lib/data';
+import { deleteEntry, listEntriesOn, saveEntry, useQuery, useSuppliers } from '../lib/data';
 import { lookupRate } from '../lib/rates';
 import {
   dateLong, defaultShift, fat as fmtFat, money, qty, quantity, round2, shiftLabel, todayISO,
@@ -21,9 +20,10 @@ export default function DailyEntry() {
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(null);
   const [flashId, setFlashId] = useState(null);
+  const [busy, setBusy] = useState(false);
   const litersRef = useRef(null);
 
-  const day = useLive(() => query(col.entries, where('date', '==', date)), [date]);
+  const day = useQuery(() => listEntriesOn(date), [date]);
   const register = useMemo(
     () => day.data.filter((e) => e.shift === shift).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)),
     [day.data, shift],
@@ -52,8 +52,9 @@ export default function DailyEntry() {
     setError('');
   }
 
-  function submit(ev) {
+  async function submit(ev) {
     ev.preventDefault();
+    if (busy) return;
     setError('');
     if (!supplier) return setError('Choose a supplier.');
     if (!(q > 0)) return setError('Enter the quantity.');
@@ -62,24 +63,30 @@ export default function DailyEntry() {
     if (!(rate > 0)) return setError(supplier.rateChart?.length ? 'Enter a rate.' : 'This supplier has no rate chart — enter the rate manually.');
 
     const overridden = f.rateTouched && round2(rate) !== chart.rate;
-    const { id, write } = saveEntry(editing?.id, {
-      supplierId: supplier.id,
-      date,
-      shift,
-      liters: f.liters,
-      ml: f.ml,
-      quantity: q,
-      fat: Math.round(fatNum * 10) / 10,
-      rate: round2(rate),
-      chartRate: chart.rate,
-      rateOverridden: overridden,
-      amount,
-      notes: f.notes.trim(),
-    });
-    write.catch((err) => setError(`Not saved: ${err.message}`));
+    setBusy(true);
+    let saved;
+    try {
+      saved = await saveEntry(editing?.id, {
+        supplierId: supplier.id,
+        date,
+        shift,
+        liters: f.liters,
+        ml: f.ml,
+        fat: Math.round(fatNum * 10) / 10,
+        rate: round2(rate),
+        chartRate: chart.rate,
+        rateOverridden: overridden,
+        notes: f.notes.trim(),
+      });
+    } catch (err) {
+      setError(`Not saved: ${err.message}`);
+      return;
+    } finally {
+      setBusy(false);
+    }
 
-    setSaved({ name: supplier.name, q, amount, updated: !!editing });
-    setFlashId(id);
+    setSaved({ name: supplier.name, q: saved.quantity, amount: saved.amount, updated: !!editing });
+    setFlashId(saved.id);
     setTimeout(() => setSaved(null), 2400);
     setTimeout(() => setFlashId(null), 1600);
 
@@ -223,10 +230,10 @@ export default function DailyEntry() {
           {error && <p className="error" role="alert">{error}</p>}
 
           <div className="actions">
-            <button className={`primary big ${saved ? 'saved' : ''}`} aria-live="polite">
+            <button className={`primary big ${saved ? 'saved' : ''}`} aria-live="polite" disabled={busy}>
               {saved
                 ? `${saved.updated ? 'Updated' : 'Saved'} · ${saved.name} · ₹${money(saved.amount)}`
-                : editing ? 'Update entry' : 'Save entry'}
+                : busy ? 'Saving…' : editing ? 'Update entry' : 'Save entry'}
             </button>
             {editing && <button type="button" className="secondary big" onClick={reset}>Cancel</button>}
           </div>

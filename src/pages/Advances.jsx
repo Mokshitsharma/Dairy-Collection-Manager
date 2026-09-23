@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { addAdvance, col, deleteAdvance, updateAdvanceEmi, useLive, useSuppliers } from '../lib/data';
+import { addAdvance, deleteAdvance, listAdvances, updateAdvanceEmi, useQuery, useSuppliers } from '../lib/data';
 import { dateShort, money, round2, todayISO } from '../lib/format';
 
 export default function Advances() {
   const suppliers = useSuppliers();
-  const all = useLive(() => col.advances, []);
+  const all = useQuery(listAdvances, []);
   const [filter, setFilter] = useState('');
   const [openOnly, setOpenOnly] = useState(true);
 

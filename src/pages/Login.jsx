@@ -1,14 +1,10 @@
 import { useState } from 'react';
-import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth, usingEmulators } from '../firebase';
+import { supabase } from '../supabase';
 
 const MESSAGES = {
-  'auth/invalid-credential': 'Email or password is incorrect.',
-  'auth/wrong-password': 'Email or password is incorrect.',
-  'auth/user-not-found': 'Email or password is incorrect.',
-  'auth/invalid-email': 'Enter a valid email address.',
-  'auth/too-many-requests': 'Too many attempts. Wait a minute and try again.',
-  'auth/network-request-failed': 'No connection. Check the network and try again.',
+  'Invalid login credentials': 'Email or password is incorrect.',
+  'Email not confirmed': 'This account is not confirmed yet. Confirm it in the Supabase dashboard.',
+  'Failed to fetch': 'No connection. Check the network and try again.',
 };
 
 export default function Login() {
@@ -21,10 +17,9 @@ export default function Login() {
     ev.preventDefault();
     setBusy(true);
     setError('');
-    try {
-      await signInWithEmailAndPassword(auth, email.trim(), password);
-    } catch (err) {
-      setError(MESSAGES[err.code] || err.message);
+    const { error: err } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    if (err) {
+      setError(MESSAGES[err.message] || err.message);
       setBusy(false);
     }
   }
@@ -45,11 +40,6 @@ export default function Login() {
         {error && <p className="error">{error}</p>}
         <button className="primary big" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
       </form>
-      {usingEmulators && (
-        <p className="muted small">
-          Local account: <span className="mono">admin@dairy.local</span> / <span className="mono">dairy123</span>
-        </p>
-      )}
     </main>
   );
 }

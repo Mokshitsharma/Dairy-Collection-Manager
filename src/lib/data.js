@@ -1,108 +1,177 @@
-import { createContext, useContext, useEffect, useState } from 'react';
-import {
-  collection, doc, onSnapshot, query, where, setDoc, updateDoc, deleteDoc, writeBatch, increment,
-} from 'firebase/firestore';
-import { db } from '../firebase';
-import { round2, round3 } from './format';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { supabase } from '../supabase';
+import { round2 } from './format';
 
-export const col = {
-  suppliers: collection(db, 'suppliers'),
-  entries: collection(db, 'entries'),
-  advances: collection(db, 'advances'),
-  settlements: collection(db, 'settlements'),
+/* ---------- row mapping (database snake_case <-> app camelCase) ---------- */
+
+const num = (v) => (v == null ? v : Number(v));
+const ts = (v) => (v ? Date.parse(v) : 0);
+
+const toSupplier = (r) => ({
+  id: r.id, name: r.name, phone: r.phone, status: r.status,
+  rateChart: (r.rate_chart || []).map((c) => ({ fat: Number(c.fat), rate: Number(c.rate) })),
+  advanceBalance: num(r.advance_balance), createdAt: ts(r.created_at),
+});
+
+const toEntry = (r) => ({
+  id: r.id, supplierId: r.supplier_id, date: r.date, shift: r.shift,
+  liters: r.liters, ml: r.ml, quantity: num(r.quantity), fat: num(r.fat),
+  rate: num(r.rate), chartRate: num(r.chart_rate), rateOverridden: r.rate_overridden,
+  amount: num(r.amount), notes: r.notes, settlementId: r.settlement_id, createdAt: ts(r.created_at),
+});
+
+const toAdvance = (r) => ({
+  id: r.id, supplierId: r.supplier_id, date: r.date, amount: num(r.amount), emi: num(r.emi),
+  remaining: num(r.remaining), note: r.note, createdAt: ts(r.created_at),
+});
+
+const toSettlement = (r) => ({
+  id: r.id, supplierId: r.supplier_id, from: r.from_date, to: r.to_date, date: r.paid_on,
+  entryCount: r.entry_count, totalLiters: num(r.total_liters), totalAmount: num(r.total_amount),
+  deducted: num(r.deducted), netPayable: num(r.net_payable), advanceBalanceAfter: num(r.advance_balance_after),
+  allocations: r.allocations, note: r.note, createdAt: ts(r.created_at),
+});
+
+/* ---------- queries ---------- */
+
+const PAGE = 1000; // PostgREST returns at most 1000 rows per request
+
+function check({ data, error }) {
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+/** Fetch every row of a filtered query, page by page. */
+async function fetchAll(table, filter = (q) => q) {
+  const rows = [];
+  for (let from = 0; ; from += PAGE) {
+    const page = check(await filter(supabase.from(table).select('*')).order('id').range(from, from + PAGE - 1));
+    rows.push(...page);
+    if (page.length < PAGE) return rows;
+  }
+}
+
+export const listSuppliers = async () => (await fetchAll('suppliers')).map(toSupplier);
+export const listEntriesOn = async (date) => (await fetchAll('entries', (q) => q.eq('date', date))).map(toEntry);
+export const listAdvances = async () => (await fetchAll('advances')).map(toAdvance);
+export const listForSupplier = {
+  entries: async (id) => (await fetchAll('entries', (q) => q.eq('supplier_id', id))).map(toEntry),
+  advances: async (id) => (await fetchAll('advances', (q) => q.eq('supplier_id', id))).map(toAdvance),
+  settlements: async (id) => (await fetchAll('settlements', (q) => q.eq('supplier_id', id))).map(toSettlement),
 };
 
-/* ---------- live queries ---------- */
+/* ---------- live data ---------- */
 
-/** Subscribe to a query built by `make()`; re-subscribes when deps change. `make` may return null. */
-export function useLive(make, deps) {
+// Every mutation (here, or on another device via realtime) bumps this version,
+// and every mounted query refetches.
+let version = 0;
+const listeners = new Set();
+export function invalidate() {
+  version += 1;
+  listeners.forEach((fn) => fn(version));
+}
+
+let timer;
+/** Refetch when the database changes from another device (phone at the center, PC in the office). */
+export function subscribeToChanges() {
+  const channel = supabase
+    .channel('db-changes')
+    .on('postgres_changes', { event: '*', schema: 'public' }, () => {
+      clearTimeout(timer);
+      timer = setTimeout(invalidate, 250);
+    })
+    .subscribe();
+  return () => supabase.removeChannel(channel);
+}
+
+/** Run `fetcher()` now, again whenever deps change, and after any data change. */
+export function useQuery(fetcher, deps) {
+  const [v, setV] = useState(version);
   const [state, setState] = useState({ data: [], loading: true, error: null });
+  const key = JSON.stringify(deps);
+  const lastKey = useRef(key);
+
   useEffect(() => {
-    const q = make();
-    if (!q) {
-      setState({ data: [], loading: false, error: null });
-      return undefined;
-    }
-    setState((s) => ({ ...s, loading: true }));
-    return onSnapshot(
-      q,
-      (snap) => setState({ data: snap.docs.map((d) => ({ id: d.id, ...d.data() })), loading: false, error: null }),
-      (error) => setState({ data: [], loading: false, error }),
+    listeners.add(setV);
+    return () => listeners.delete(setV);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    // Keep showing the current rows during a background refresh; clear them only when
+    // the query itself changes (e.g. another date or supplier).
+    const changed = lastKey.current !== key;
+    lastKey.current = key;
+    setState((s) => ({ data: changed ? [] : s.data, loading: true, error: null }));
+    fetcher().then(
+      (data) => !cancelled && setState({ data, loading: false, error: null }),
+      (error) => !cancelled && setState((s) => ({ ...s, loading: false, error })),
     );
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
+  }, [key, v]);
+
   return state;
 }
 
 export const SuppliersContext = createContext({ data: [], loading: true, byId: {} });
 export const useSuppliers = () => useContext(SuppliersContext);
 
-export const bySupplier = (c, supplierId) => (supplierId ? query(c, where('supplierId', '==', supplierId)) : null);
+async function mutate(promise) {
+  const data = check(await promise);
+  invalidate();
+  return data;
+}
 
 /* ---------- suppliers ---------- */
 
-export async function saveSupplier(id, data) {
+export async function saveSupplier(id, { name, phone, status, rateChart }) {
+  const row = { name, phone, status, rate_chart: rateChart };
   if (id) {
-    await updateDoc(doc(db, 'suppliers', id), data);
+    await mutate(supabase.from('suppliers').update(row).eq('id', id));
     return id;
   }
-  const ref = doc(col.suppliers);
-  await setDoc(ref, { advanceBalance: 0, createdAt: Date.now(), ...data });
-  return ref.id;
+  const [created] = await mutate(supabase.from('suppliers').insert(row).select('id'));
+  return created.id;
 }
 
 /* ---------- daily entries ---------- */
 
-/**
- * Save (create or update) a daily entry. The caller doesn't wait for the server:
- * Firestore applies the write locally at once, so the register updates even offline.
- */
-export function saveEntry(id, e) {
-  const ref = id ? doc(db, 'entries', id) : doc(col.entries);
-  const data = {
-    supplierId: e.supplierId,
+/** Create or update a daily entry. Quantity and amount are computed by the database. */
+export async function saveEntry(id, e) {
+  const row = {
+    supplier_id: e.supplierId,
     date: e.date,
     shift: e.shift,
     liters: Number(e.liters) || 0,
     ml: Number(e.ml) || 0,
-    quantity: e.quantity,
     fat: e.fat,
     rate: e.rate,
-    chartRate: e.chartRate ?? null,
-    rateOverridden: !!e.rateOverridden,
-    amount: e.amount,
+    chart_rate: e.chartRate ?? null,
+    rate_overridden: !!e.rateOverridden,
     notes: e.notes || '',
   };
-  const write = id ? updateDoc(ref, data) : setDoc(ref, { ...data, settlementId: null, createdAt: Date.now() });
-  return { id: ref.id, write };
+  const q = id
+    ? supabase.from('entries').update(row).eq('id', id).select('*')
+    : supabase.from('entries').insert(row).select('*');
+  const [saved] = await mutate(q);
+  return toEntry(saved);
 }
 
-export const deleteEntry = (id) => deleteDoc(doc(db, 'entries', id));
+export const deleteEntry = (id) => mutate(supabase.from('entries').delete().eq('id', id));
 
 /* ---------- advances ---------- */
 
-export async function addAdvance({ supplierId, amount, date, emi, note }) {
-  const batch = writeBatch(db);
-  batch.set(doc(col.advances), {
-    supplierId, amount, date, emi, note: note || '', remaining: amount, createdAt: Date.now(),
-  });
-  batch.update(doc(db, 'suppliers', supplierId), { advanceBalance: increment(amount) });
-  return batch.commit();
-}
+export const addAdvance = ({ supplierId, amount, date, emi, note }) =>
+  mutate(supabase.from('advances').insert({
+    supplier_id: supplierId, amount, date, emi, note: note || '', remaining: amount,
+  }));
 
-export async function deleteAdvance(a) {
-  if (round2(a.remaining) !== round2(a.amount)) throw new Error('EMI has already been deducted from this advance.');
-  const batch = writeBatch(db);
-  batch.delete(doc(db, 'advances', a.id));
-  batch.update(doc(db, 'suppliers', a.supplierId), { advanceBalance: increment(-a.amount) });
-  return batch.commit();
-}
+export const deleteAdvance = (a) => mutate(supabase.from('advances').delete().eq('id', a.id));
 
-export const updateAdvanceEmi = (id, emi) => updateDoc(doc(db, 'advances', id), { emi });
+export const updateAdvanceEmi = (id, emi) => mutate(supabase.from('advances').update({ emi }).eq('id', id));
 
 /* ---------- settlements ---------- */
-
-const byOldest = (a, b) => a.date.localeCompare(b.date) || (a.createdAt || 0) - (b.createdAt || 0);
 
 /** Sum of each open advance's EMI (capped at what is left on it), capped at the period's milk amount. */
 export function suggestedDeduction(advances, totalAmount) {
@@ -112,63 +181,13 @@ export function suggestedDeduction(advances, totalAmount) {
   return round2(Math.max(0, Math.min(emi, totalAmount)));
 }
 
-/**
- * Split a deduction across open advances: first each advance's own EMI (oldest first),
- * then any extra goes to the oldest advances until they are cleared.
- */
-export function allocateDeduction(advances, deduction) {
-  const open = advances.filter((a) => a.remaining > 0).sort(byOldest);
-  const alloc = new Map();
-  let left = round2(deduction);
-  for (const a of open) {
-    const take = round2(Math.min(a.emi || 0, a.remaining, left));
-    if (take > 0) { alloc.set(a.id, take); left = round2(left - take); }
-  }
-  for (const a of open) {
-    const room = round2(a.remaining - (alloc.get(a.id) || 0));
-    const take = round2(Math.min(room, left));
-    if (take > 0) { alloc.set(a.id, round2((alloc.get(a.id) || 0) + take)); left = round2(left - take); }
-  }
-  return [...alloc.entries()].map(([advanceId, amount]) => ({ advanceId, amount }));
-}
+/** Settles every unsettled entry in the period and recovers EMI, as one database transaction. */
+export const createSettlement = ({ supplierId, from, to, paidOn, deduction, note }) =>
+  mutate(supabase.rpc('create_settlement', {
+    p_supplier_id: supplierId, p_from: from, p_to: to, p_paid_on: paidOn, p_deduction: deduction, p_note: note || '',
+  }));
 
-export async function createSettlement({ supplier, from, to, paidOn, entries, advances, deduction, note }) {
-  if (entries.length > 450) throw new Error('Too many entries for one settlement; use a shorter period.');
-  const totalLiters = round3(entries.reduce((t, e) => t + e.quantity, 0));
-  const totalAmount = round2(entries.reduce((t, e) => t + e.amount, 0));
-  const allocations = allocateDeduction(advances, Math.min(deduction, totalAmount));
-  const deducted = round2(allocations.reduce((t, a) => t + a.amount, 0));
-
-  const ref = doc(col.settlements);
-  const batch = writeBatch(db);
-  batch.set(ref, {
-    supplierId: supplier.id,
-    from, to, date: paidOn,
-    entryCount: entries.length,
-    totalLiters, totalAmount,
-    deducted,
-    netPayable: round2(totalAmount - deducted),
-    advanceBalanceAfter: round2((supplier.advanceBalance || 0) - deducted),
-    allocations,
-    entryIds: entries.map((e) => e.id),
-    note: note || '',
-    createdAt: Date.now(),
-  });
-  for (const e of entries) batch.update(doc(db, 'entries', e.id), { settlementId: ref.id });
-  for (const a of allocations) batch.update(doc(db, 'advances', a.advanceId), { remaining: increment(-a.amount) });
-  if (deducted) batch.update(doc(db, 'suppliers', supplier.id), { advanceBalance: increment(-deducted) });
-  return batch.commit();
-}
-
-/** Undo a settlement: entries become unsettled again and EMI deductions go back onto the advances. */
-export async function reverseSettlement(s) {
-  const batch = writeBatch(db);
-  batch.delete(doc(db, 'settlements', s.id));
-  for (const id of s.entryIds || []) batch.update(doc(db, 'entries', id), { settlementId: null });
-  for (const a of s.allocations || []) batch.update(doc(db, 'advances', a.advanceId), { remaining: increment(a.amount) });
-  if (s.deducted) batch.update(doc(db, 'suppliers', s.supplierId), { advanceBalance: increment(s.deducted) });
-  return batch.commit();
-}
+export const reverseSettlement = (s) => mutate(supabase.rpc('reverse_settlement', { p_id: s.id }));
 
 /* ---------- ledger ---------- */
 

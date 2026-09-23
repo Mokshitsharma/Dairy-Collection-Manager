@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  buildLedger, bySupplier, col, createSettlement, reverseSettlement, suggestedDeduction, useLive, useSuppliers,
+  buildLedger, createSettlement, listForSupplier, reverseSettlement, suggestedDeduction, useQuery, useSuppliers,
 } from '../lib/data';
 import {
   addDays, dateLong, dateShort, fat as fmtFat, money, qty, round2, shiftShort, toISO, todayISO,
@@ -36,9 +36,10 @@ export default function Ledger() {
   const suppliers = useSuppliers();
   const supplier = id ? suppliers.byId[id] : null;
 
-  const entries = useLive(() => bySupplier(col.entries, id), [id]);
-  const advances = useLive(() => bySupplier(col.advances, id), [id]);
-  const settlements = useLive(() => bySupplier(col.settlements, id), [id]);
+  const none = async () => [];
+  const entries = useQuery(() => (id ? listForSupplier.entries(id) : none()), [id]);
+  const advances = useQuery(() => (id ? listForSupplier.advances(id) : none()), [id]);
+  const settlements = useQuery(() => (id ? listForSupplier.settlements(id) : none()), [id]);
   const loading = entries.loading || advances.loading || settlements.loading;
 
   const [preset, setPreset] = useState('month');
@@ -245,7 +246,7 @@ function Settle({ supplier, from, to, entries, advances }) {
     setBusy(true);
     setError('');
     try {
-      await createSettlement({ supplier, from, to, paidOn, entries: unsettled, advances, deduction, note });
+      await createSettlement({ supplierId: supplier.id, from, to, paidOn, deduction, note });
       setDone(true);
     } catch (err) {
       setError(err.message);

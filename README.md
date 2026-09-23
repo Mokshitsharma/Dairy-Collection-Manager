@@ -1,45 +1,49 @@
 # Dairy Collection Manager
 
 Daily milk collection register, supplier rate charts, per-supplier ledger, advances with EMI recovery.
-React + Vite, Firebase Auth + Firestore. Single owner login.
+React + Vite on Vercel, Supabase (PostgreSQL + Auth) for data and the single owner login. Free tiers, no card.
 
-## Run locally (no Firebase account needed)
+## 1. Set up Supabase (once)
+
+1. Sign up at https://supabase.com (GitHub login works, no card) → **New project**.
+   Pick a region near you (e.g. *Mumbai / ap-south-1*) and save the database password somewhere safe.
+2. **SQL Editor** → New query → paste all of [`supabase/schema.sql`](supabase/schema.sql) → **Run**.
+   This creates the tables, the owner-only access rules and the settlement functions.
+3. **Authentication → Sign In / Providers → Email**: turn **off** "Allow new users to sign up"
+   (and "Confirm email" can stay off). Save.
+4. **Authentication → Users → Add user → Create new user**: the owner's email and password,
+   with *Auto Confirm User* ticked.
+5. **Project Settings → API**: copy the **Project URL** and the **anon public** key.
+
+## 2. Run locally
 
 ```
 npm install
-npm start            # Auth + Firestore emulators and the app on http://localhost:5173
-npm run local-user   # once, in another terminal: creates admin@dairy.local / dairy123
+cp .env.example .env.local   # then paste the Project URL and anon key into it
+npm start                    # http://localhost:5173
 ```
 
-Local data is saved to `.emulator-data/` when you stop with Ctrl+C and reloaded on the next start.
-On a phone on the same Wi-Fi, open `http://<this-PC's-IP>:5173`.
+Local and deployed copies use the same Supabase database.
 
-## Deploy to Vercel
+## 3. Deploy on Vercel
 
-1. **Create the Firebase project** at https://console.firebase.google.com (the free Spark plan is enough).
-   - *Build > Firestore Database* → Create database (production mode, pick a region near you, e.g. `asia-south1`).
-   - *Build > Authentication* → Get started → enable **Email/Password**.
-   - *Authentication > Users* → **Add user** with the owner's email and password.
-   - *Authentication > Settings > User actions* → untick **Enable create (sign-up)**, so nobody else can register.
-   - *Project settings > Your apps* → add a **Web app** and copy its config values.
-2. **Publish the security rules** (only signed-in users can read or write):
-   ```
-   npx firebase login
-   npm run deploy:rules -- --project <your-project-id>
-   ```
-   Or paste the contents of `firestore.rules` into *Firestore > Rules* in the console and click Publish.
-3. **Deploy on Vercel.** Import the repo (or run `npx vercel` in this folder), keep the detected Vite settings,
-   and add the six variables from `.env.example` under *Settings > Environment Variables*. Then deploy.
-4. **Authorize the domain.** In Firebase *Authentication > Settings > Authorized domains*, add your
-   `*.vercel.app` domain, or sign-in will be refused.
+Import the GitHub repo in Vercel (it detects Vite), add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`
+under *Settings → Environment Variables*, and deploy. `vercel.json` makes refreshes on `/ledger/...` work.
 
-`vercel.json` sends every path to `index.html`, so refreshing `/ledger/...` works.
-`.env.development` (emulator settings) is used only by `npm run dev`; production builds never read it.
+The anon key is safe to ship in the browser: without signing in as the owner, the database's
+row-level security rules return nothing and reject every write.
+
+Free Supabase projects pause after 7 days with no activity; daily use keeps it awake, and a paused
+project is restored with one click in the dashboard.
 
 ## How the numbers work
 
-- **Quantity** = liters + ml / 1000. **Amount** = quantity × rate.
+- **Quantity** = liters + ml / 1000. **Amount** = quantity × rate, rounded to paise (computed by the database).
 - **Rate** comes from the supplier's chart. A fat % between two chart rows is interpolated; below or above the chart it uses the nearest end and says so. Rates can be typed in manually (marked `m`).
 - **Ledger balance** = milk credited − cash paid (advances + settlement payouts).
   `Cr` means the unit owes the supplier; `Dr` means the supplier still owes on an advance.
-- **Settlement** (Ledger page) covers every unsettled entry in the chosen date range. It deducts EMI (each open advance's EMI, oldest first, capped at the milk amount; you can edit it), records the net payout and reduces the advance balance. A settlement can be reversed.
+- **Settlement** (Ledger page) covers every unsettled entry in the chosen date range, in one database transaction.
+  It deducts EMI (each open advance's EMI oldest first, then any extra to the oldest; capped at the milk amount
+  and the outstanding advance), records the net payout and reduces the advance balance.
+  Settled entries are locked; reversing the settlement unlocks them and returns the EMI to the advances.
+- An advance can be deleted only before any EMI has been taken from it.
