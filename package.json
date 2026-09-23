@@ -1,0 +1,28 @@
+{
+  "name": "dairy-collection-manager",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "vite build",
+    "preview": "vite preview",
+    "emulators": "node scripts/emulators.mjs",
+    "seed": "node scripts/seed.mjs",
+    "start": "concurrently -k -n db,web -c gray,green \"npm:emulators\" \"npm:dev\""
+  },
+  "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/ibm-plex-sans": "^5.3.0",
+    "firebase": "^11.10.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.30.6"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
+    "concurrently": "^10.0.5",
+    "firebase-tools": "^13.35.1",
+    "vite": "^5.4.21"
+  }
+}

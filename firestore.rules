@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // No login yet: open access. Fine for the local emulator, but do NOT deploy
+    // these rules to a real project — add auth back first.
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}
