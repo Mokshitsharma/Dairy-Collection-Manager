@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "emulators": "node scripts/emulators.mjs",
-    "seed": "node scripts/seed.mjs",
+    "local-user": "node scripts/local-user.mjs",
+    "deploy:rules": "firebase deploy --only firestore:rules",
     "start": "concurrently -k -n db,web -c gray,green \"npm:emulators\" \"npm:dev\""
   },
   "dependencies": {

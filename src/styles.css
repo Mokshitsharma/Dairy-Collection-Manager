@@ -236,6 +236,13 @@ table { width: 100%; border-collapse: collapse; }
 .tester .field { max-width: 140px; margin: 0; }
 .tester p { margin: 18px 0 0; font-size: 16px; }
 
+/* ---------- login ---------- */
+
+.login { max-width: 360px; margin: 12vh auto 0; padding: 0 var(--gutter); }
+.login h1 { margin-bottom: 2px; }
+.login > .muted:first-of-type { margin-top: 0; margin-bottom: 24px; }
+.login .primary { width: 100%; }
+
 /* ---------- small screens: registers become lists ---------- */
 
 @media (max-width: 900px) {

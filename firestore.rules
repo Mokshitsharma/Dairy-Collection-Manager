@@ -1,10 +1,10 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // No login yet: open access. Fine for the local emulator, but do NOT deploy
-    // these rules to a real project — add auth back first.
+    // Single owner account. Create that one user in the Firebase console
+    // (Authentication > Users) and turn off public sign-up, so "signed in" == "owner".
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if request.auth != null;
     }
   }
 }

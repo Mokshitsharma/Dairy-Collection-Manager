@@ -1,23 +1,40 @@
 # Dairy Collection Manager
 
 Daily milk collection register, supplier rate charts, per-supplier ledger, advances with EMI recovery.
-React + Vite, Firebase Firestore.
+React + Vite, Firebase Auth + Firestore. Single owner login.
 
-## Run locally
+## Run locally (no Firebase account needed)
 
 ```
 npm install
-npm start          # Firestore emulator (port 8080) + app on http://localhost:5173
-npm run seed       # optional, in another terminal: 5 sample suppliers, a week of entries, one advance
+npm start            # Auth + Firestore emulators and the app on http://localhost:5173
+npm run local-user   # once, in another terminal: creates admin@dairy.local / dairy123
 ```
 
-Emulator data is saved to `.emulator-data/` when the emulator shuts down cleanly (Ctrl+C) and reloaded on the next start.
+Local data is saved to `.emulator-data/` when you stop with Ctrl+C and reloaded on the next start.
 On a phone on the same Wi-Fi, open `http://<this-PC's-IP>:5173`.
 
-## Using a real Firebase project
+## Deploy to Vercel
 
-Put the project's config in `.env.local` with `VITE_USE_EMULATORS=false` (see `.env`).
-There is no login yet and `firestore.rules` allows open access, so add authentication before deploying anywhere public.
+1. **Create the Firebase project** at https://console.firebase.google.com (the free Spark plan is enough).
+   - *Build > Firestore Database* → Create database (production mode, pick a region near you, e.g. `asia-south1`).
+   - *Build > Authentication* → Get started → enable **Email/Password**.
+   - *Authentication > Users* → **Add user** with the owner's email and password.
+   - *Authentication > Settings > User actions* → untick **Enable create (sign-up)**, so nobody else can register.
+   - *Project settings > Your apps* → add a **Web app** and copy its config values.
+2. **Publish the security rules** (only signed-in users can read or write):
+   ```
+   npx firebase login
+   npm run deploy:rules -- --project <your-project-id>
+   ```
+   Or paste the contents of `firestore.rules` into *Firestore > Rules* in the console and click Publish.
+3. **Deploy on Vercel.** Import the repo (or run `npx vercel` in this folder), keep the detected Vite settings,
+   and add the six variables from `.env.example` under *Settings > Environment Variables*. Then deploy.
+4. **Authorize the domain.** In Firebase *Authentication > Settings > Authorized domains*, add your
+   `*.vercel.app` domain, or sign-in will be refused.
+
+`vercel.json` sends every path to `index.html`, so refreshing `/ledger/...` works.
+`.env.development` (emulator settings) is used only by `npm run dev`; production builds never read it.
 
 ## How the numbers work
 
