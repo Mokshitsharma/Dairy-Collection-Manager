@@ -1,5 +1,21 @@
-# Dairy Collection Manager
+<!-- readme-refresh 2026-11 -->
+<div align="center">
 
+# 🥛 Dairy Collection Manager
+
+**Daily milk collection register, rate charts and supplier ledger**
+
+<img src="https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB" alt="React" /> <img src="https://img.shields.io/badge/Vite-646CFF?style=for-the-badge&logo=vite&logoColor=white" alt="Vite" /> <img src="https://img.shields.io/badge/Supabase-3FCF8E?style=for-the-badge&logo=supabase&logoColor=white" alt="Supabase" /> <img src="https://img.shields.io/badge/PostgreSQL-4169E1?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL" /> <img src="https://img.shields.io/badge/Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white" alt="Vercel" />
+
+</div>
+
+## ✨ Highlights
+
+- Daily milk collection register and supplier rate charts
+- Per-supplier ledger with advances and EMI recovery
+- Single owner login; runs on free tiers
+
+<!-- body -->
 Daily milk collection register, supplier rate charts, per-supplier ledger, advances with EMI recovery.
 React + Vite on Vercel, Supabase (PostgreSQL + Auth) for data and the single owner login. Free tiers, no card.
 
@@ -47,3 +63,7 @@ project is restored with one click in the dashboard.
   and the outstanding advance), records the net payout and reduces the advance balance.
   Settled entries are locked; reversing the settlement unlocks them and returns the EMI to the advances.
 - An advance can be deleted only before any EMI has been taken from it.
+
+---
+
+<div align="center"><sub>Built by <a href="https://github.com/Mokshitsharma">Mokshit Sharma</a> · <a href="https://mokshitsharma27.vercel.app/">Portfolio</a> · <a href="https://www.linkedin.com/in/mokshit-sharma-75b5ab305">LinkedIn</a></sub></div>
